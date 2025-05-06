@@ -7,7 +7,7 @@ A Python package for temporal abstraction of time series data, providing various
 You can install this package directly from GitHub using pip:
 
 ```bash
-pip install git+https://github.com/yourusername/temporal_abstraction.git
+pip install git+https://github.com/yuval-haim/ta_package.git
 ```
 
 ## Usage
