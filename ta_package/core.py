@@ -21,8 +21,8 @@ class TemporalAbstraction:
               paa: str = None, paa_window: int = None,
               per_entity: bool = False,
               split_test: bool = False,
-              save_output: bool = True, output_dir: str = None,
-              max_gap: int = 1, **kwargs):
+              save_output: bool = True, output_dir: str = None, train_ratio: float = 0.7,
+              max_gap: int = 1, train_states = None, **kwargs):
         """
         Apply temporal abstraction and (optionally) split into train and test sets.
         
@@ -70,7 +70,7 @@ class TemporalAbstraction:
             data_to_use = paa_transform(data_to_use, paa_window, agg_method=paa)
         
         if split_test:
-            train_data, test_data = self._split_train_test(data_to_use)
+            train_data, test_data = self._split_train_test(data_to_use, train_ratio=train_ratio)
         else:
             train_data = data_to_use.copy()
             test_data = None
@@ -143,6 +143,11 @@ class TemporalAbstraction:
                 elif method == "persist":
                     from .methods.persist import Persist
                     ta_method = Persist(**kwargs)
+                elif method == "knowledge":
+                    from .methods.knowledge import KnowledgeBased
+                    if train_states is None:
+                        raise ValueError("train_states parameter is required for knowledge-based method")
+                    ta_method = KnowledgeBased(states=train_states, **kwargs)
                 else:
                     raise ValueError(f"Method '{method}' is not supported.")
                 final_result = ta_method.fit_transform(train_data)

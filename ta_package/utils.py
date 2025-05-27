@@ -255,3 +255,13 @@ def generate_KL_content(symbolic_series: pd.DataFrame, max_gap: int) -> str:
         kl_lines.append(entity_line)
     
     return "\n".join(kl_lines)
+
+def split_train_test(data: pd.DataFrame, train_ratio: float = 0.7):
+        unique_ids = data[ENTITY_ID].unique()
+        unique_ids = sorted(unique_ids)
+        cutoff = int(len(unique_ids) * train_ratio)
+        train_ids = unique_ids[:cutoff]
+        test_ids = unique_ids[cutoff:]
+        train = data[data[ENTITY_ID].isin(train_ids)]
+        test = data[data[ENTITY_ID].isin(test_ids)]
+        return train, test
