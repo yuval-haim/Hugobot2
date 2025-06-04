@@ -248,7 +248,7 @@ def generate_KL_content(symbolic_series: pd.DataFrame, max_gap: int) -> str:
         # Sort intervals by start time and then by TEMPORAL_PROPERTY_ID.
         intervals = sorted(intervals, key=lambda x: (x["start"], x[TEMPORAL_PROPERTY_ID]))
         # Format intervals as "start_time,end_time,state,TEMPORAL_PROPERTY_ID"
-        interval_strs = [f"{interval['start']},{interval['end']},{interval['StateID']},{interval[TEMPORAL_PROPERTY_ID]}" 
+        interval_strs = [f"{int(interval['start'])},{int(interval['end'])},{int(interval['StateID'])},{int(interval[TEMPORAL_PROPERTY_ID])}" 
                          for interval in intervals]
         # Build the line for the entity.
         entity_line = f"{entity};\n" + ";".join(interval_strs) + ";"
