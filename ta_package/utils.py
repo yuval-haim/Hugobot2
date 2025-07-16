@@ -235,14 +235,14 @@ def generate_KL_content(symbolic_series: pd.DataFrame, max_gap: int) -> str:
                 ts = row[TIMESTAMP]
                 state = row["StateID"]
                 if current_interval is None:
-                    current_interval = {"start": ts, "end": ts, "StateID": state, TEMPORAL_PROPERTY_ID: tpid}
+                    current_interval = {"start": ts-1, "end": ts, "StateID": state, TEMPORAL_PROPERTY_ID: tpid}
                 else:
                     # If the same state and property, and the gap is within max_gap, extend the interval.
                     if state == current_interval["StateID"] and (ts - current_interval["end"]) <= max_gap:
                         current_interval["end"] = ts
                     else:
                         intervals.append(current_interval)
-                        current_interval = {"start": ts, "end": ts, "StateID": state, TEMPORAL_PROPERTY_ID: tpid}
+                        current_interval = {"start": ts-1, "end": ts, "StateID": state, TEMPORAL_PROPERTY_ID: tpid}
             if current_interval is not None:
                 intervals.append(current_interval)
         # Sort intervals by start time and then by TEMPORAL_PROPERTY_ID.
