@@ -1,8 +1,23 @@
 import numpy as np
 import pandas as pd
 from .base import TAMethod
-from ..utils import assign_state, paa_transform
+from ..utils import paa_transform
 from ..constants import ENTITY_ID, TEMPORAL_PROPERTY_ID, TIMESTAMP, VALUE
+
+def assign_state(angle, boundaries):
+    """Assign state based on angle and boundaries - same as debugger version"""
+    if np.isnan(angle):
+        return -1  # Return -1 for NaN angles as requested
+    
+    if len(boundaries) < 2:
+        return -1
+    
+    if angle <= boundaries[0]:
+        return 0  # Decreasing
+    elif angle >= boundaries[1]:
+        return 2  # Increasing
+    else:
+        return 1  # Stable/close to zero
 
 class Gradient(TAMethod):
     def __init__(self, gradient_window_size: int, method: str = 'quantile',
@@ -66,22 +81,33 @@ class Gradient(TAMethod):
             self.boundaries = {}
             for tpid, group in computed.groupby(TEMPORAL_PROPERTY_ID):
                 angles = group["angle"].dropna()
+                
+                if len(angles) == 0:
+                    # No valid angles found, use default boundaries that will result in state -1
+                    self.boundaries[tpid] = [-45, 45]  # Default boundaries
+                    continue
+                
                 if self.method == 'quantile':
                     self.boundaries[tpid] = self._determine_boundaries_quantile(angles)
                 elif self.method == 'knowledge':
                     if not self.knowledge_cutoffs or len(self.knowledge_cutoffs) != 3:
                         raise ValueError("Knowledge-based method requires a list of three cutoff values.")
-                    # Here we use the full list of cutoffs as supplied.
-                    self.boundaries[tpid] = self.knowledge_cutoffs
+                    # Use only the first two values for boundaries (lower, upper)
+                    self.boundaries[tpid] = self.knowledge_cutoffs[:2]
                 else:
                     raise ValueError(f"Unknown method: {self.method}")
         else:
-            if self.method == 'quantile':
-                self.boundaries = self._determine_boundaries_quantile(computed["angle"].dropna())
+            angles = computed["angle"].dropna()
+            if len(angles) == 0:
+                # No valid angles found, use default boundaries
+                self.boundaries = [-45, 45]  # Default boundaries
+            elif self.method == 'quantile':
+                self.boundaries = self._determine_boundaries_quantile(angles)
             elif self.method == 'knowledge':
                 if not self.knowledge_cutoffs or len(self.knowledge_cutoffs) != 3:
                     raise ValueError("Knowledge-based method requires a list of three cutoff values.")
-                self.boundaries = self.knowledge_cutoffs
+                # Use only the first two values for boundaries (lower, upper)
+                self.boundaries = self.knowledge_cutoffs[:2]
             else:
                 raise ValueError(f"Unknown method: {self.method}")
 

@@ -360,34 +360,34 @@ class TemporalAbstraction:
         final_data = pd.concat(composite_results, ignore_index=True)
         return final_data, global_states_rows
     
-    def _map_local_state_ex(self, tpid, method_name, boundaries, local_state, global_mapping, global_states_rows):
-        key = (tpid, method_name, local_state)
-        if key not in global_mapping:
-            num_bins = len(boundaries) + 1 if boundaries is not None else 1
-            if boundaries is None:
-                bin_low = None
-                bin_high = None
-            else:
-                if local_state == 1:
-                    bin_low = -math.inf
-                    bin_high = boundaries[0]
-                elif local_state == num_bins:
-                    bin_low = boundaries[-1]
-                    bin_high = math.inf
-                else:
-                    bin_low = boundaries[local_state - 2]
-                    bin_high = boundaries[local_state - 1]
-            global_id = len(global_mapping) + 1
-            global_mapping[key] = global_id
-            global_states_rows.append({
-                "StateID": global_id,
-                "TemporalPropertyID": tpid,
-                "MethodName": method_name,
-                "BinId": local_state,
-                "BinLow": round(bin_low, 5) if bin_low is not None else None,
-                "BinHigh": round(bin_high, 5) if bin_high is not None else None,
-            })
-        return global_mapping[key]
+    # def _map_local_state_ex(self, tpid, method_name, boundaries, local_state, global_mapping, global_states_rows):
+    #     key = (tpid, method_name, local_state)
+    #     if key not in global_mapping:
+    #         num_bins = len(boundaries) + 1 if boundaries is not None else 1
+    #         if boundaries is None:
+    #             bin_low = None
+    #             bin_high = None
+    #         else:
+    #             if local_state == 1:
+    #                 bin_low = -math.inf
+    #                 bin_high = boundaries[0]
+    #             elif local_state == num_bins:
+    #                 bin_low = boundaries[-1]
+    #                 bin_high = math.inf
+    #             else:
+    #                 bin_low = boundaries[local_state - 2]
+    #                 bin_high = boundaries[local_state - 1]
+    #         global_id = len(global_mapping) + 1
+    #         global_mapping[key] = global_id
+    #         global_states_rows.append({
+    #             "StateID": global_id,
+    #             "TemporalPropertyID": tpid,
+    #             "MethodName": method_name,
+    #             "BinId": local_state,
+    #             "BinLow": round(bin_low, 5) if bin_low is not None else None,
+    #             "BinHigh": round(bin_high, 5) if bin_high is not None else None,
+    #         })
+    #     return global_mapping[key]
 
     def _composite_fit_transform(self, train_data: pd.DataFrame, method_config: dict):
         """
@@ -527,6 +527,8 @@ class TemporalAbstraction:
         key = (tpid, method_name, local_state)
         if key not in global_mapping:
             num_bins = len(boundaries) + 1 if boundaries is not None else 1
+            if local_state == -1:
+                return -1
             if boundaries is None:
                 bin_low = None
                 bin_high = None

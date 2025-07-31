@@ -249,9 +249,14 @@ def generate_KL_content(symbolic_series: pd.DataFrame, max_gap: int) -> str:
                 intervals.append(current_interval)
         # Sort intervals by start time and then by TEMPORAL_PROPERTY_ID.
         intervals = sorted(intervals, key=lambda x: (x["start"], x["end"], x["StateID"], x[TEMPORAL_PROPERTY_ID]))
+                # check if there any nan in interval stat and state id or temporal property id and if there is print them
+        for interval in intervals:
+            if pd.isna(interval["StateID"]):
+                interval["StateID"] = -1  # Replace NaN with -1
         # Format intervals as "start_time,end_time,state,TEMPORAL_PROPERTY_ID"
         interval_strs = [f"{int(interval['start'])},{int(interval['end'])},{int(interval['StateID'])},{int(interval[TEMPORAL_PROPERTY_ID])}" 
                          for interval in intervals]
+
         # Build the line for the entity.
         entity_line = f"{entity};\n" + ";".join(interval_strs) + ";"
         kl_lines.append(entity_line)
