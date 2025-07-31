@@ -364,6 +364,9 @@ def map_states_to_test_composite(test_df, states_list, method_config, output_dir
                 elif value == bin_high and bin_high != float('inf'):
                     state_id = state['StateID']
                     break
+                else:
+                    # If no state found, assign a default state ID (e.g., 0 or -1)
+                    state_id = -1
             
             # Add row to results
             result_rows.append({
