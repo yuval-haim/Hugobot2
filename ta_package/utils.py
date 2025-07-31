@@ -3,6 +3,8 @@ import pandas as pd
 import numpy as np
 from .constants import ENTITY_ID, VALUE, TEMPORAL_PROPERTY_ID, TIMESTAMP
 from scipy.stats import entropy
+import os 
+import math
 
 def assign_state(value, boundaries):
     """
@@ -235,18 +237,18 @@ def generate_KL_content(symbolic_series: pd.DataFrame, max_gap: int) -> str:
                 ts = row[TIMESTAMP]
                 state = row["StateID"]
                 if current_interval is None:
-                    current_interval = {"start": ts-1, "end": ts, "StateID": state, TEMPORAL_PROPERTY_ID: tpid}
+                    current_interval = {"start": ts, "end": ts+1, "StateID": state, TEMPORAL_PROPERTY_ID: tpid}
                 else:
                     # If the same state and property, and the gap is within max_gap, extend the interval.
                     if state == current_interval["StateID"] and (ts - current_interval["end"]) <= max_gap:
-                        current_interval["end"] = ts
+                        current_interval["end"] = ts+1
                     else:
                         intervals.append(current_interval)
-                        current_interval = {"start": ts-1, "end": ts, "StateID": state, TEMPORAL_PROPERTY_ID: tpid}
+                        current_interval = {"start": ts, "end": ts+1, "StateID": state, TEMPORAL_PROPERTY_ID: tpid}
             if current_interval is not None:
                 intervals.append(current_interval)
         # Sort intervals by start time and then by TEMPORAL_PROPERTY_ID.
-        intervals = sorted(intervals, key=lambda x: (x["start"], x[TEMPORAL_PROPERTY_ID]))
+        intervals = sorted(intervals, key=lambda x: (x["start"], x["end"], x["StateID"], x[TEMPORAL_PROPERTY_ID]))
         # Format intervals as "start_time,end_time,state,TEMPORAL_PROPERTY_ID"
         interval_strs = [f"{int(interval['start'])},{int(interval['end'])},{int(interval['StateID'])},{int(interval[TEMPORAL_PROPERTY_ID])}" 
                          for interval in intervals]
@@ -265,3 +267,157 @@ def split_train_test(data: pd.DataFrame, train_ratio: float = 0.7):
         train = data[data[ENTITY_ID].isin(train_ids)]
         test = data[data[ENTITY_ID].isin(test_ids)]
         return train, test
+
+def remove_na(data_to_use):
+    na_per_column = data_to_use.isna().sum()          # Series: one entry per column
+    total_na       = int(na_per_column.sum())        
+
+    if total_na > 0:
+        # show only the columns that actually have missing values
+        print(f"\nWarning: about to remove {total_na} rows containing NaNs in "
+            f"{', '.join(na_per_column[na_per_column > 0].index)}")
+
+    # Now drop rows that have a NaN in any of the critical columns
+    data_to_use = data_to_use.dropna(
+        subset=[ENTITY_ID, TEMPORAL_PROPERTY_ID, VALUE]
+    )
+    return data_to_use
+    
+def save_entity_ids(entity_relations: pd.DataFrame, output_path: str) -> None:
+    
+    df = pd.DataFrame(entity_relations.items(), columns=['EntityID', 'ClassID'])
+    # make entity id and class id integers
+    df['EntityID'] = df['EntityID'].astype(int)
+    df['ClassID'] = df['ClassID'].astype(int)
+    save_path = output_path + "/entity-class-relations.csv"
+    df.to_csv(save_path, index=False)
+
+def map_states_to_test_composite(test_df, states_list, method_config, output_dir , max_gap):
+    """
+    Maps state IDs to dataframe rows based on temporal property values and method configurations.
+    
+    Parameters:
+    df: DataFrame with columns ['EntityID', 'TemporalPropertyID', 'TimeStamp', 'TemporalPropertyValue']
+    states_list: List of state dictionaries with StateID, TemporalPropertyID, MethodName, BinLow, BinHigh
+    method_config: Configuration dictionary defining methods for each property
+    
+    Returns:
+    DataFrame with additional StateID column and expanded rows for each method
+    """
+    
+    # Convert states list to DataFrame for easier manipulation
+    states_df = pd.DataFrame(states_list)
+    entity_class = {}
+
+    class_rows = test_df[test_df[TEMPORAL_PROPERTY_ID] == -1].copy()
+    if not class_rows.empty:
+        for _, row in class_rows.iterrows():
+            ent = row[ENTITY_ID]
+            entity_class[ent] = int(float(row[VALUE]))
+    test_df = test_df[test_df[TEMPORAL_PROPERTY_ID] != -1]
+    test_df = remove_na(test_df)  # drop na
+
+    # Get methods from config
+    methods = method_config["default"]
+    
+    result_rows = []
+    
+    for _, row in test_df.iterrows():
+        entity_id = row['EntityID']
+        temporal_property_id = row['TemporalPropertyID']
+        timestamp = row['TimeStamp']
+        value = row['TemporalPropertyValue']
+        
+        # For each method, find the appropriate state
+        for method in methods:
+            method_name = method['method']
+            
+            # Filter states for this temporal property and method
+            relevant_states = states_df[
+                (states_df['TemporalPropertyID'] == temporal_property_id) & 
+                (states_df['MethodName'] == method_name)
+            ]
+            
+            # Find which bin this value falls into
+            state_id = None
+            for _, state in relevant_states.iterrows():
+                bin_low = state['BinLow']
+                bin_high = state['BinHigh']
+                
+                # Handle infinity values
+                if bin_low == -np.inf:
+                    bin_low = float('-inf')
+                if bin_high == np.inf:
+                    bin_high = float('inf')
+                
+                # Handle NaN values   - or maybe need to put it specific symbol
+                if pd.isna(bin_low):
+                    bin_low = float('-inf')
+                if pd.isna(bin_high):
+                    bin_high = float('inf')
+                
+                # Check if value falls in this bin
+                if bin_low <= value < bin_high:
+                    state_id = state['StateID']
+                    break
+                # Special case for the highest bin (inclusive of upper bound)
+                elif value == bin_high and bin_high != float('inf'):
+                    state_id = state['StateID']
+                    break
+            
+            # Add row to results
+            result_rows.append({
+                'EntityID': entity_id,
+                'TemporalPropertyID': temporal_property_id,
+                'TimeStamp': timestamp,
+                'TemporalPropertyValue': value,
+                'StateID': state_id,
+                'MethodName': method_name
+            })
+        # convert result_rows to DataFrame
+    df = pd.DataFrame(result_rows)
+    # drop col entitiy class
+    # make timestamp entity id and temporal property id integers
+    df[ENTITY_ID] = df[ENTITY_ID].astype(int)
+    df[TEMPORAL_PROPERTY_ID] = df[TEMPORAL_PROPERTY_ID].astype(int)
+    df[TIMESTAMP] = df[TIMESTAMP].astype(float)
+    
+    save_results(entity_class, output_dir, df, states_df, max_gap)
+
+    df = df.drop(columns=['EntityClass'])
+    return df
+
+def save_results(entity_class, output_dir: str, symbolic_series: pd.DataFrame, states_df, max_gap: int):
+        os.makedirs(output_dir, exist_ok=True)
+        
+        # Define a helper function for sorting keys:
+        def sort_key(x):
+            if isinstance(x, int):
+                return (0, x)
+            else:
+                return (1, str(x))
+        
+
+        states_file = os.path.join(output_dir, "states.csv")
+        states_df.to_csv(states_file, index=False)
+        
+        symbolic_file = os.path.join(output_dir, "symbolic_time_series.csv")
+        symbolic_series.to_csv(symbolic_file, index=False)
+        
+        kl_content = generate_KL_content(symbolic_series, max_gap)
+        kl_file = os.path.join(output_dir, "KL.txt")
+        with open(kl_file, "w") as f:
+            f.write(kl_content)
+        
+        if entity_class:
+            symbolic_series["EntityClass"] = symbolic_series[ENTITY_ID].map(entity_class)
+            for cls in sorted(set(entity_class.values())):
+                subset = symbolic_series[symbolic_series["EntityClass"] == cls]
+                kl_content_cls = generate_KL_content(subset, max_gap)
+                kl_file_cls = os.path.join(output_dir, f"KL-class-{float(cls)}.txt")
+                with open(kl_file_cls, "w") as f:
+                    f.write(kl_content_cls)
+
+        save_entity_ids(entity_class, output_dir)
+
+        print(f"Results saved in directory: {output_dir}")

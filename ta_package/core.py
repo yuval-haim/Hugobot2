@@ -2,7 +2,7 @@
 import os
 import math
 import pandas as pd
-from .utils import paa_transform, generate_KL_content
+from .utils import paa_transform, generate_KL_content, save_entity_ids, remove_na
 from .constants import ENTITY_ID, VALUE, TEMPORAL_PROPERTY_ID, TIMESTAMP
 
 class TemporalAbstraction:
@@ -16,6 +16,7 @@ class TemporalAbstraction:
         """
         self.data = data
         self.entity_class = {}  # Mapping: {EntityID: class}
+        self.method_config = None
 
     def apply(self, method: str = None, method_config: dict = None,
               paa: str = None, paa_window: int = None,
@@ -64,7 +65,9 @@ class TemporalAbstraction:
                 ent = row[ENTITY_ID]
                 self.entity_class[ent] = int(float(row[VALUE]))
         data_to_use = data_to_use[data_to_use[TEMPORAL_PROPERTY_ID] != -1]
-        
+        # drop na
+        data_to_use = remove_na(data_to_use)
+
         # Apply global PAA pre-processing if specified.
         if paa is not None and paa_window is not None:
             data_to_use = paa_transform(data_to_use, paa_window, agg_method=paa)
@@ -381,8 +384,8 @@ class TemporalAbstraction:
                 "TemporalPropertyID": tpid,
                 "MethodName": method_name,
                 "BinId": local_state,
-                "BinLow": round(bin_low, 3),
-                "BinHigh": round(bin_high, 3),
+                "BinLow": round(bin_low, 5) if bin_low is not None else None,
+                "BinHigh": round(bin_high, 5) if bin_high is not None else None,
             })
         return global_mapping[key]
 
@@ -582,8 +585,8 @@ class TemporalAbstraction:
                         "StateID": global_mapping[(tpid, local_bin)],
                         "TemporalPropertyID": tpid,
                         "BinId": local_bin,
-                        "BinLow": round(bin_low, 3),
-                        "BinHigh": round(bin_high, 3),
+                        "BinLow": round(bin_low, 5),
+                        "BinHigh": round(bin_high, 5),
                     })
             states_df = pd.DataFrame(states_rows)
         states_file = os.path.join(output_dir, "states.csv")
@@ -616,8 +619,10 @@ class TemporalAbstraction:
             for cls in sorted(set(self.entity_class.values())):
                 subset = updated_series[updated_series["EntityClass"] == cls]
                 kl_content_cls = generate_KL_content(subset, max_gap)
-                kl_file_cls = os.path.join(output_dir, f"KL_{cls}.txt")
+                kl_file_cls = os.path.join(output_dir, f"KL-class-{float(cls)}.txt")
                 with open(kl_file_cls, "w") as f:
                     f.write(kl_content_cls)
-        
+
+        save_entity_ids(self.entity_class, output_dir)
+
         print(f"Results saved in directory: {output_dir}")

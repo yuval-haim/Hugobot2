@@ -8,7 +8,7 @@ class KnowledgeBased(TAMethod):
         """
         Parameters:
           states (dict): A dictionary of pre-determined boundaries (cutoffs) for each variable.
-                         Format example: { variable_id: [cutoff1, cutoff2, ...],
+                         Format example: { state_id: [cutoff1, cutoff2, ...],
                                              "default": [default_cutoff1, default_cutoff2, ...] }
           per_variable (bool): If True, each TemporalPropertyID is processed separately (default True).
         """
@@ -21,12 +21,18 @@ class KnowledgeBased(TAMethod):
         """
         self.boundaries = self.states
 
-    def transform(self, data: pd.DataFrame) -> pd.DataFrame:
+    def transform(self, data: pd.DataFrame, method_config = None) -> pd.DataFrame:
         """
         Using the provided boundaries (self.boundaries), assign a state id for each sample.
         If a specific variable is not found in the dictionary, the method falls back to the default boundaries.
         """
         data = data.copy()
+
+        if method_config is not None:
+            for cfg in method_config:
+                method_name = cfg.get("method")
+                data = data[data[TEMPORAL_PROPERTY_ID] == method_name]
+
         if self.per_variable:
             # For each row, retrieve the boundaries for its variable;
             # if not found, use the boundaries under the key "default" (or an empty list if neither exists).
