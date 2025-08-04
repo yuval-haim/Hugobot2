@@ -132,6 +132,7 @@ def td4c(data: pd.DataFrame, bins: int, per_variable: bool = True, distance_meas
       symbolic_series: Transformed DataFrame with a "state" column (local state id).
       states: The boundaries (cutpoints) computed per variable.
     """
+    data = data[data[TEMPORAL_PROPERTY_ID] != -1]
     method_instance = TD4C(bins, per_variable, distance_measure=distance_measure)
     symbolic_series = method_instance.fit_transform(data)
     states = method_instance.get_states()

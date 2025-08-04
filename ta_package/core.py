@@ -4,6 +4,8 @@ import math
 import pandas as pd
 from .utils import paa_transform, generate_KL_content, save_entity_ids, remove_na
 from .constants import ENTITY_ID, VALUE, TEMPORAL_PROPERTY_ID, TIMESTAMP
+# import List
+from typing import List
 
 class TemporalAbstraction:
     def __init__(self, data: pd.DataFrame):
@@ -23,7 +25,7 @@ class TemporalAbstraction:
               per_entity: bool = False,
               split_test: bool = False,
               save_output: bool = True, output_dir: str = None, train_ratio: float = 0.7,
-              max_gap: int = 1, train_states = None, **kwargs):
+              max_gap: int = 1, train_states = None, skip_var: List[int] = None, **kwargs):
         """
         Apply temporal abstraction and (optionally) split into train and test sets.
         
@@ -57,6 +59,12 @@ class TemporalAbstraction:
           In composite mode with split_test: ((final_train, final_test), final_states)
         """
         data_to_use = self.data.copy()
+        if skip_var is not None:
+            print(f"Skipping variables: {skip_var}")
+            skip_rows = data_to_use[data_to_use[TEMPORAL_PROPERTY_ID].isin(skip_var)] # check if temporalPropertyID is in the list skip_var
+            # remove skip rows from data_to_use
+            data_to_use = data_to_use[~data_to_use.index.isin(skip_rows.index)]
+        
         
         # --- Extract Class Assignment Rows ---
         class_rows = data_to_use[data_to_use[TEMPORAL_PROPERTY_ID] == -1].copy()
@@ -155,6 +163,10 @@ class TemporalAbstraction:
                     raise ValueError(f"Method '{method}' is not supported.")
                 final_result = ta_method.fit_transform(train_data)
                 final_states = ta_method.get_states()
+        
+        if skip_var is not None:
+            # concat final_result with skip rows
+            final_result = pd.concat([final_result, skip_rows], ignore_index=True)
         
         if save_output:
             if output_dir is None:
@@ -427,8 +439,9 @@ class TemporalAbstraction:
                     from .methods.gradient import gradient
                     local_result, local_states = gradient(subset, **params, per_variable=True)
                 elif method_name == "td4c":
-                    from .methods.td4c import TD4C
-                    local_result, local_states = TD4C(subset= subset, **params, per_variable=True).fit_transform(subset), TD4C(subset= subset, **params, per_variable=True).get_states()
+                    from .methods.td4c import td4c
+                    local_result, local_states = td4c(subset, **params, per_variable=True)
+                    # local_result, local_states = TD4C(subset= subset, **params, per_variable=True).fit_transform(subset), TD4C(subset= subset, **params, per_variable=True).get_states()
                 elif method_name == "persist":
                     from .methods.persist import Persist
                     local_result, local_states = Persist(subset= subset, **params, per_variable=True).fit_transform(subset), Persist(subset= subset, **params, per_variable=True).get_states()
