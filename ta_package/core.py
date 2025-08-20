@@ -441,6 +441,7 @@ class TemporalAbstraction:
                 elif method_name == "td4c":
                     from .methods.td4c import td4c
                     local_result, local_states = td4c(subset, **params, per_variable=True)
+
                     # local_result, local_states = TD4C(subset= subset, **params, per_variable=True).fit_transform(subset), TD4C(subset= subset, **params, per_variable=True).get_states()
                 elif method_name == "persist":
                     from .methods.persist import Persist
@@ -454,6 +455,8 @@ class TemporalAbstraction:
                     boundaries = local_states.get(tpid)
                 else:
                     boundaries = local_states
+                # print(local_result)
+                # print(local_states)
                 col_name = f"state_{method_name}"
                 local_result = local_result.copy()
                 local_result[col_name] = local_result.apply(

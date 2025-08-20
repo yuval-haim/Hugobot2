@@ -1,4 +1,5 @@
 import pandas as pd
+import numpy as np
 from .base import TAMethod
 from ..utils import assign_state
 from ..constants import ENTITY_ID, TEMPORAL_PROPERTY_ID, TIMESTAMP, VALUE
@@ -19,7 +20,27 @@ class KnowledgeBased(TAMethod):
         """
         In the knowledge-based method no learning is done—the boundaries are provided by the user.
         """
-        self.boundaries = self.states
+        # if state is df, convert it to a dictionary where state_id and cutoffs is value
+        if isinstance(self.states, pd.DataFrame):
+            df = self.states.copy()
+            df['BinLow'] = pd.to_numeric(df['BinLow'], errors='coerce')
+            df['BinHigh'] = pd.to_numeric(df['BinHigh'], errors='coerce')
+
+            # Filter out inf values
+            df_filtered = df[(df['BinLow'] != -np.inf) & (df['BinHigh'] != np.inf)]
+
+            # Group by TemporalPropertyID and find min(BinLow) and max(BinHigh)
+            result = df_filtered.groupby('TemporalPropertyID').agg({
+                'BinLow': 'min',
+                'BinHigh': 'max'
+            })
+
+            # Convert to dict with list values
+            final_dict = result.apply(lambda row: [row['BinLow'], row['BinHigh']], axis=1).to_dict()
+            self.boundaries = final_dict
+        else:
+            # If states is already a dictionary, use it directly
+            self.boundaries = self.states
 
     def transform(self, data: pd.DataFrame, method_config = None) -> pd.DataFrame:
         """

@@ -43,6 +43,12 @@ class TD4C(TAMethod):
             self.bins,
             lambda d, cutoffs: self._ddm_scoring_function(d, cutoffs)
         )
+        
+
+        # if all values in df[TemporalPropertyValue] are the same return candidates in the len of self.bins -1 with the value
+        if df[VALUE].nunique() == 1:
+            print(f"Warning: Not enough variability in for TemporalPropertyID {df[TEMPORAL_PROPERTY_ID].max()} for cutpoints. Using default candidates.")
+            candidates = [df[VALUE].min()] * (self.bins - 1)
         return candidates
 
     def _ddm_scoring_function(self, df: pd.DataFrame, cutoffs):
@@ -86,6 +92,11 @@ class TD4C(TAMethod):
                     group = group.assign(Class=group[ENTITY_ID].map(self.entity_class))
                 else:
                     group = group.assign(Class=0)
+                # if len(group) <= self.bins:
+                    
+                #     print(f"Warning: Not enough data for TemporalPropertyID {tpid} to generate cutpoints.")
+                #     boundaries[tpid] = [-np.inf, np.inf]  # Default boundaries
+                #     continue
                 boundaries[tpid] = self._generate_cutpoints(group)
             self.boundaries = boundaries
         else:
@@ -93,6 +104,9 @@ class TD4C(TAMethod):
                 data = data.assign(Class=data[ENTITY_ID].map(self.entity_class))
             else:
                 data = data.assign(Class=0)
+            # if len(data) <= self.bins:
+            #     print(f"Warning: Not enough data for TemporalPropertyID {tpid} to generate cutpoints.")
+            #     boundaries = [-np.inf, np.inf]  # Default boundaries
             self.boundaries = self._generate_cutpoints(data)
 
     def transform(self, data: pd.DataFrame) -> pd.DataFrame:
