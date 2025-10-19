@@ -76,7 +76,7 @@ class KnowledgeBased(TAMethod):
         return self.transform(data)
 
     def get_states(self):
-        return self.boundaries
+        return self.states 
 
 # Method-level convenience function.
 def knowledge(data: pd.DataFrame, states: dict, per_variable: bool = True):

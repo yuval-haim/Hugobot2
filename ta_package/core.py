@@ -447,8 +447,9 @@ class TemporalAbstraction:
                     from .methods.persist import Persist
                     local_result, local_states = Persist(subset= subset, **params, per_variable=True).fit_transform(subset), Persist(subset= subset, **params, per_variable=True).get_states()
                 elif method_name == "knowledge":
-                    from .methods.knowledge import KnowledgeBased
-                    local_result, local_states = KnowledgeBased(**params, per_variable=True).fit_transform(subset), KnowledgeBased(**params, per_variable=True).get_states()
+                    from .methods.knowledge import knowledge
+                    local_result, local_states = knowledge(subset, **params, per_variable=True)
+                    # local_result, local_states = KnowledgeBased(**params, per_variable=True).fit_transform(subset), KnowledgeBased(**params, per_variable=True).get_states()
                 else:
                     raise ValueError(f"Unsupported method: {method_name} for variable {tpid}")
                 if isinstance(local_states, dict):

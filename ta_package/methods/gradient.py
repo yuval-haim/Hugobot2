@@ -20,7 +20,7 @@ def assign_state(angle, boundaries):
         return 1  # Stable/close to zero
 
 class Gradient(TAMethod):
-    def __init__(self, gradient_window_size: int, method: str = 'quantile',
+    def __init__(self, gradient_window_size: int, sub_method: str = 'quantile',
                  bins: int = 3, close_to_zero_percentage: float = 30.0,
                  knowledge_cutoffs: list = None, per_variable: bool = True,
                  paa_method: str = None, paa_window: int = None):
@@ -37,7 +37,7 @@ class Gradient(TAMethod):
           paa_window (int): Optional PAA window size; default is None.
         """
         self.gradient_window_size = gradient_window_size
-        self.method = method
+        self.method = sub_method
         self.bins = bins
         self.close_to_zero_percentage = close_to_zero_percentage
         self.knowledge_cutoffs = knowledge_cutoffs
