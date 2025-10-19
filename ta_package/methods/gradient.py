@@ -13,11 +13,11 @@ def assign_state(angle, boundaries):
         return -1
     
     if angle <= boundaries[0]:
-        return 0  # Decreasing
+        return 1  # Decreasing
     elif angle >= boundaries[1]:
-        return 2  # Increasing
+        return 3  # Increasing
     else:
-        return 1  # Stable/close to zero
+        return 2  # Stable/close to zero
 
 class Gradient(TAMethod):
     def __init__(self, gradient_window_size: int, sub_method: str = 'quantile',
