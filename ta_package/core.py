@@ -412,6 +412,54 @@ class TemporalAbstraction:
         composite_results = []
         default_config = method_config.get("default", None)
         unique_vars = train_data[TEMPORAL_PROPERTY_ID].unique()
+        
+        # STEP 1: Pre-process ALL knowledge method states across ALL variables FIRST
+        # This ensures all knowledge StateIDs are registered before other methods start
+        knowledge_results = {}  # Store knowledge results per variable to use later
+        
+        for tpid in unique_vars:
+            subset = train_data[train_data[TEMPORAL_PROPERTY_ID] == tpid]
+            
+            if isinstance(method_config, dict) and tpid in method_config:
+                cfgs = method_config[tpid]
+            else:
+                cfgs = method_config.get("default")
+            if not isinstance(cfgs, list):
+                cfgs = [cfgs]
+            
+            # Look for knowledge method
+            for config in cfgs:
+                if config.get("method") == "knowledge":
+                    method_name = "knowledge"
+                    params = config.copy()
+                    params.pop("method", None)
+                    
+                    # Run knowledge method
+                    from .methods.knowledge import knowledge
+                    local_result, local_states = knowledge(subset, **params, per_variable=True)
+                    
+                    # If it's a CSV DataFrame, add ALL its states to global_states_rows NOW
+                    if isinstance(local_states, pd.DataFrame):
+                        for _, row in local_states[local_states['TemporalPropertyID'] == tpid].iterrows():
+                            state_id = int(row['StateID'])
+                            bin_id = row.get('BinID', row.get('BinId', 0))
+                            
+                            global_states_rows.append({
+                                "StateID": state_id,
+                                "TemporalPropertyID": row['TemporalPropertyID'],
+                                "TemporalPropertyName": row.get('TemporalPropertyName', ''),
+                                "MethodName": method_name,
+                                "BinId": bin_id,
+                                "BinLabel": row.get('BinLabel', ''),
+                                "BinLow": row['BinLow'],
+                                "BinHigh": row['BinHigh'],
+                            })
+                        
+                        # Store the result to use when building final composite results
+                        knowledge_results[tpid] = (local_result, local_states)
+                    break  # Only one knowledge method per variable
+        
+        # STEP 2: Now process each variable with ALL methods (including knowledge from cache)
         for tpid in unique_vars:
             subset = train_data[train_data[TEMPORAL_PROPERTY_ID] == tpid]
             # Here, we assume that for composite per-variable mode, method_config is a dict keyed by tpid.
@@ -422,10 +470,24 @@ class TemporalAbstraction:
             if not isinstance(cfgs, list):
                 cfgs = [cfgs]
             local_global_states = {}
+            
             for config in cfgs:
                 method_name = config.get("method")
                 params = config.copy()
                 params.pop("method", None)
+                
+                # Check if this is knowledge method and we already processed it
+                if method_name == "knowledge" and tpid in knowledge_results:
+                    # Use cached knowledge result
+                    local_result, local_states = knowledge_results[tpid]
+                    col_name = f"state_{method_name}"
+                    local_result = local_result.copy()
+                    # The state column already contains the correct StateID from the CSV
+                    local_result[col_name] = local_result["state"]
+                    local_global_states[method_name] = local_result[col_name]
+                    continue  # Skip to next method
+                
+                # Process other methods normally
                 if method_name == "equal_width":
                     from .methods.equal_width import equal_width
                     local_result, local_states = equal_width(subset, **params, per_variable=True)
@@ -441,23 +503,22 @@ class TemporalAbstraction:
                 elif method_name == "td4c":
                     from .methods.td4c import td4c
                     local_result, local_states = td4c(subset, **params, per_variable=True)
-
-                    # local_result, local_states = TD4C(subset= subset, **params, per_variable=True).fit_transform(subset), TD4C(subset= subset, **params, per_variable=True).get_states()
                 elif method_name == "persist":
                     from .methods.persist import Persist
                     local_result, local_states = Persist(subset= subset, **params, per_variable=True).fit_transform(subset), Persist(subset= subset, **params, per_variable=True).get_states()
                 elif method_name == "knowledge":
+                    # Knowledge method not in cache (dict-based, not CSV)
                     from .methods.knowledge import knowledge
                     local_result, local_states = knowledge(subset, **params, per_variable=True)
-                    # local_result, local_states = KnowledgeBased(**params, per_variable=True).fit_transform(subset), KnowledgeBased(**params, per_variable=True).get_states()
                 else:
                     raise ValueError(f"Unsupported method: {method_name} for variable {tpid}")
+                
+                # Normal handling for all non-cached methods
                 if isinstance(local_states, dict):
                     boundaries = local_states.get(tpid)
                 else:
                     boundaries = local_states
-                # print(local_result)
-                # print(local_states)
+                
                 col_name = f"state_{method_name}"
                 local_result = local_result.copy()
                 local_result[col_name] = local_result.apply(
@@ -559,7 +620,14 @@ class TemporalAbstraction:
                 else:
                     bin_low = boundaries[local_state - 2]
                     bin_high = boundaries[local_state - 1]
-            global_id = len(global_mapping) + 1
+            
+            # Calculate next StateID: should be max(existing StateIDs) + 1
+            if global_states_rows:
+                max_state_id = max(row["StateID"] for row in global_states_rows)
+                global_id = max_state_id + 1
+            else:
+                global_id = len(global_mapping) + 1
+            
             global_mapping[key] = global_id
             global_states_rows.append({
                 "StateID": global_id,
@@ -581,9 +649,15 @@ class TemporalAbstraction:
             else:
                 return (1, str(x))
         
-        if isinstance(states, list) and states and "MethodName" in states[0]:
+        # Check if states is already a DataFrame (from knowledge method CSV)
+        if isinstance(states, pd.DataFrame):
+            # Knowledge method provided a CSV - save it as-is
+            states_df = states.copy()
+        elif isinstance(states, list) and states and "MethodName" in states[0]:
+            # Composite mode with multiple methods
             states_df = pd.DataFrame(states)
         else:
+            # Single method with dict boundaries
             global_mapping = {}
             states_rows = []
             for tpid in sorted(states.keys(), key=sort_key):
@@ -613,18 +687,24 @@ class TemporalAbstraction:
         
         updated_series = symbolic_series.copy().reset_index(drop=True)
         if "MethodName" not in updated_series.columns:
-            global_mapping = {}
-            for tpid in sorted(states.keys(), key=sort_key):
-                boundaries = states[tpid]
-                num_bins = len(boundaries) + 1
-                for local_bin in range(1, num_bins + 1):
-                    global_mapping[(tpid, local_bin)] = len(global_mapping) + 1
-            def map_state(row):
-                tpid = row[TEMPORAL_PROPERTY_ID]
-                local_state = int(row["state"])
-                return global_mapping.get((tpid, local_state), local_state)
-            updated_series["state"] = updated_series.apply(map_state, axis=1)
-            updated_series = updated_series.rename(columns={"state": "StateID"})
+            # Single method mode
+            if isinstance(states, pd.DataFrame):
+                # Knowledge method with CSV - state column already contains correct StateIDs
+                updated_series = updated_series.rename(columns={"state": "StateID"})
+            else:
+                # Other methods with dict boundaries
+                global_mapping = {}
+                for tpid in sorted(states.keys(), key=sort_key):
+                    boundaries = states[tpid]
+                    num_bins = len(boundaries) + 1
+                    for local_bin in range(1, num_bins + 1):
+                        global_mapping[(tpid, local_bin)] = len(global_mapping) + 1
+                def map_state(row):
+                    tpid = row[TEMPORAL_PROPERTY_ID]
+                    local_state = int(row["state"])
+                    return global_mapping.get((tpid, local_state), local_state)
+                updated_series["state"] = updated_series.apply(map_state, axis=1)
+                updated_series = updated_series.rename(columns={"state": "StateID"})
         symbolic_file = os.path.join(output_dir, "symbolic_time_series.csv")
         updated_series.to_csv(symbolic_file, index=False)
         

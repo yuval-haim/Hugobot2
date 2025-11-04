@@ -9,7 +9,7 @@ def assign_state(angle, boundaries):
     if np.isnan(angle):
         return -1  # Return -1 for NaN angles as requested
     
-    if len(boundaries) < 2:
+    if not boundaries or len(boundaries) < 2:
         return -1
     
     if angle <= boundaries[0]:
@@ -31,7 +31,7 @@ class Gradient(TAMethod):
           bins (int): Number of bins (typically 3) used when method is 'quantile'.
           close_to_zero_percentage (float): Percentage of samples to fall into the middle bin (only for quantile method).
           knowledge_cutoffs (list): A list of cutoff values for the 'knowledge'-based method.
-                                    (For example, [-90, 0, 90]).  
+                                    (For example, [-90, 90]).  
           per_variable (bool): Process each TemporalPropertyID separately.
           paa_method (str): Optional PAA method; default is None (no PAA applied).
           paa_window (int): Optional PAA window size; default is None.
@@ -90,10 +90,14 @@ class Gradient(TAMethod):
                 if self.method == 'quantile':
                     self.boundaries[tpid] = self._determine_boundaries_quantile(angles)
                 elif self.method == 'knowledge':
-                    if not self.knowledge_cutoffs or len(self.knowledge_cutoffs) != 3:
-                        raise ValueError("Knowledge-based method requires a list of three cutoff values.")
-                    # Use only the first two values for boundaries (lower, upper)
-                    self.boundaries[tpid] = self.knowledge_cutoffs[:2]
+                    if not self.knowledge_cutoffs:
+                        raise ValueError("Need to Pass Knowledge cutoffs for knowledge-based method. only two values required.")
+                    try:
+                        self.boundaries[tpid] = self.knowledge_cutoffs[tpid][:2]
+                    # if ValueError occurs, use default boundaries
+                    except KeyError:
+                        print(f"Warning: Knowledge cutoffs not properly defined. not mapping gradient abstraction for {tpid}.")
+                        self.boundaries[tpid] = None
                 else:
                     raise ValueError(f"Unknown method: {self.method}")
         else:
@@ -104,10 +108,16 @@ class Gradient(TAMethod):
             elif self.method == 'quantile':
                 self.boundaries = self._determine_boundaries_quantile(angles)
             elif self.method == 'knowledge':
-                if not self.knowledge_cutoffs or len(self.knowledge_cutoffs) != 3:
-                    raise ValueError("Knowledge-based method requires a list of three cutoff values.")
+                if not self.knowledge_cutoffs:
+                    raise ValueError("Need to Pass Knowledge cutoffs for knowledge-based method. only two values required.")
                 # Use only the first two values for boundaries (lower, upper)
-                self.boundaries = self.knowledge_cutoffs[:2]
+                try:
+                    self.boundaries = self.knowledge_cutoffs[tpid][:2]
+                # if KeyError occurs, use default boundaries
+                except KeyError:
+                    print(f"Warning: Knowledge cutoffs not properly defined. not mapping gradient abstraction for {tpid}.")
+                    self.boundaries[tpid] = None
+
             else:
                 raise ValueError(f"Unknown method: {self.method}")
 
