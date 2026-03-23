@@ -5,6 +5,141 @@ from .constants import ENTITY_ID, VALUE, TEMPORAL_PROPERTY_ID, TIMESTAMP
 from scipy.stats import entropy
 import os 
 import math
+import logging
+from tqdm import tqdm
+
+# Setup logging for utils
+logger = logging.getLogger(__name__)
+
+
+# =============================================================================
+# TID3 Configuration Mapping
+# =============================================================================
+# TID3 method naming convention: tid3[_<scoring>][_<duration_pref>]
+#   - "tid3" alone uses defaults (max_t_stat_sum, two_sided)
+#   - Scoring shorthand: tstat, ks, kl, mw (mann-whitney), ws (wasserstein), avgdiff
+#   - Duration pref shorthand: c1longer (class1_longer), c0longer (class0_longer)
+#
+# Examples:
+#   "tid3"           -> max_t_stat_sum, two_sided
+#   "tid3_ks"        -> max_ks_stat_sum, two_sided
+#   "tid3_kl_c1longer" -> max_kl_divergence_sum, class1_longer
+#   "tid3_mw_c0longer" -> max_mannwhitney_sum, class0_longer
+
+TID3_SCORING_MAP = {
+    "tstat": "max_t_stat_sum",
+    "ks": "max_ks_stat_sum",
+    "kl": "max_kl_divergence_sum",
+    "mw": "max_mannwhitney_sum",
+    "ws": "max_wasserstein_sum",
+    "avgdiff": "avg_duration_diff_sum",
+    "selftrans": "self_transition_diff"
+}
+
+TID3_DURATION_PREF_MAP = {
+    "twosided": "two_sided",
+    "c1longer": "class1_longer",
+    "c0longer": "class0_longer",
+}
+
+
+def parse_tid3_config(method_name):
+    """
+    Parse a TID3 method string into scoring_method and duration_preference.
+
+    Examples:
+        "tid3" -> ("max_t_stat_sum", "two_sided")
+        "tid3_ks" -> ("max_ks_stat_sum", "two_sided")
+        "tid3_kl_c1longer" -> ("max_kl_divergence_sum", "class1_longer")
+
+    Parameters:
+        method_name (str): Method string to parse
+
+    Returns:
+        tuple: (scoring_method, duration_preference)
+    """
+    # Default values
+    scoring_method = "max_t_stat_sum"
+    duration_preference = "two_sided"
+
+    # Remove "tid3" prefix and split by underscore
+    if method_name == "tid3":
+        return scoring_method, duration_preference
+
+    parts = method_name.split("_")
+    if parts[0] != "tid3":
+        raise ValueError(f"Invalid TID3 method name: {method_name}")
+
+    # Parse remaining parts
+    for part in parts[1:]:
+        if part in TID3_SCORING_MAP:
+            scoring_method = TID3_SCORING_MAP[part]
+        elif part in TID3_DURATION_PREF_MAP:
+            duration_preference = TID3_DURATION_PREF_MAP[part]
+        else:
+            raise ValueError(f"Unknown TID3 config part: '{part}' in method '{method_name}'. "
+                           f"Valid scoring: {list(TID3_SCORING_MAP.keys())}, "
+                           f"Valid duration_pref: {list(TID3_DURATION_PREF_MAP.keys())}")
+
+    return scoring_method, duration_preference
+
+
+# =============================================================================
+# TD4C Configuration Mapping
+# =============================================================================
+# TD4C method naming convention: td4c[_<distance_measure>]
+#   - "td4c" alone uses default (cosine)
+#   - Distance measure shorthand: cosine, kl (kullback_leibler), entropy
+#
+# Examples:
+#   "td4c"        -> cosine
+#   "td4c_cosine" -> cosine
+#   "td4c_kl"     -> kullback_leibler
+#   "td4c_entropy" -> entropy
+
+TD4C_DISTANCE_MEASURE_MAP = {
+    "cosine": "cosine",
+    "kl": "kullback_leibler",
+    "entropy": "entropy",
+}
+
+
+def parse_td4c_config(method_name):
+    """
+    Parse a TD4C method string into distance_measure.
+    
+    Examples:
+        "td4c" -> "cosine"
+        "td4c_cosine" -> "cosine"
+        "td4c_kl" -> "kullback_leibler"
+        "td4c_entropy" -> "entropy"
+    
+    Parameters:
+        method_name (str): Method string to parse
+    
+    Returns:
+        str: distance_measure name
+    """
+    # Default value
+    distance_measure = "cosine"
+    
+    # Remove "td4c" prefix and split by underscore
+    if method_name == "td4c":
+        return distance_measure
+    
+    parts = method_name.split("_")
+    if parts[0] != "td4c":
+        raise ValueError(f"Invalid TD4C method name: {method_name}")
+    
+    # Parse remaining parts
+    for part in parts[1:]:
+        if part in TD4C_DISTANCE_MEASURE_MAP:
+            distance_measure = TD4C_DISTANCE_MEASURE_MAP[part]
+        else:
+            raise ValueError(f"Unknown TD4C config part: '{part}' in method '{method_name}'. "
+                           f"Valid distance measures: {list(TD4C_DISTANCE_MEASURE_MAP.keys())}")
+    
+    return distance_measure
 
 def assign_state(value, boundaries):
     """
@@ -39,6 +174,7 @@ def generate_candidate_cutpoints(df, nb_candidates):
     # Evenly space candidate indices between 1 and len(values)-1:
     indices = np.linspace(1, len(values) - 1, num=nb_candidates, dtype=int)
     candidates = values[indices]
+    candidates = np.unique(candidates)
     return candidates.tolist()
 
 def candidate_selection(df, nb_bins, scoring_function, nb_candidates=100):
@@ -64,11 +200,22 @@ def candidate_selection(df, nb_bins, scoring_function, nb_candidates=100):
     chosen_cutpoints = np.array([], dtype=float)
     chosen_scores = np.array([], dtype=float)
     
-    for _ in range(1, nb_bins):
+    # Show progress only in debug mode
+    show_progress = logger.isEnabledFor(logging.DEBUG)
+    
+    for iteration in range(1, nb_bins):
         scores = np.full(len(candidate_pool), -np.inf)
+        
+        # Progress bar for evaluating candidates in this iteration
+        pbar = tqdm(total=len(candidate_pool), 
+                   desc=f"    Evaluating candidates (bin {iteration}/{nb_bins-1})",
+                   disable=not show_progress,
+                   leave=False)
+        
         for i, candidate in enumerate(candidate_pool):
             # Skip candidate if it is already (or nearly) in the chosen_cutpoints.
             if len(chosen_cutpoints) > 0 and np.any(np.isclose(candidate, chosen_cutpoints)):
+                pbar.update(1)
                 continue
             
             # Create a list of suggested cutpoints.
@@ -82,24 +229,39 @@ def candidate_selection(df, nb_bins, scoring_function, nb_candidates=100):
                 )
             except Exception as e:
                 scores[i] = -np.inf
+                pbar.update(1)
                 continue
             
             scores[i] = scoring_function(df_temp, suggested.tolist())
+            pbar.update(1)
+        
+        pbar.close()
         
         # If no valid candidate remains, break early.
-        if len(scores) == 0 or np.all(np.isneginf(scores)):
+        if len(scores) == 0:
+            logger.warning(f"Early termination at iteration {iteration}: No candidate scores available")
+            break
+        elif np.all(np.isneginf(scores)):
+            logger.warning(f"Early termination at iteration {iteration}: All {len(scores)} candidates produced invalid scores")
             break
         
         best_idx = np.argmax(scores)
         best_candidate = candidate_pool[best_idx]
+        best_score = scores[best_idx]
         chosen_cutpoints = np.append(chosen_cutpoints, best_candidate)
-        chosen_scores = np.append(chosen_scores, scores[best_idx])
+        chosen_scores = np.append(chosen_scores, best_score)
+        
         # Remove this candidate from the pool.
         candidate_pool.pop(best_idx)
         # Also, remove any candidate that is nearly equal to a chosen candidate.
         candidate_pool = [c for c in candidate_pool if not np.any(np.isclose(c, chosen_cutpoints))]
+        
         chosen_cutpoints = np.sort(chosen_cutpoints)
         chosen_scores = chosen_scores[np.argsort(chosen_cutpoints)]
+        
+        # Check if we're running out of candidates
+        if len(candidate_pool) == 0 and iteration < nb_bins - 1:
+            logger.warning(f"Candidate pool exhausted at iteration {iteration}: achieved {len(chosen_cutpoints) + 1}/{nb_bins} bins")
     
     return list(chosen_cutpoints), list(chosen_scores)
 
@@ -279,8 +441,7 @@ def remove_na(data_to_use):
 
     if total_na > 0:
         # show only the columns that actually have missing values
-        print(f"\nWarning: about to remove {total_na} rows containing NaNs in "
-            f"{', '.join(na_per_column[na_per_column > 0].index)}")
+        logger.warning(f"Removing {total_na} rows containing NaNs in {', '.join(na_per_column[na_per_column > 0].index)}")
 
     # Now drop rows that have a NaN in any of the critical columns
     data_to_use = data_to_use.dropna(
@@ -428,4 +589,4 @@ def save_results(entity_class, output_dir: str, symbolic_series: pd.DataFrame, s
 
         save_entity_ids(entity_class, output_dir)
 
-        print(f"Results saved in directory: {output_dir}")
+        logger.info(f"Results saved in directory: {output_dir}")

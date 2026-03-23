@@ -2,8 +2,10 @@
 import os
 import math
 import pandas as pd
-from .utils import paa_transform, generate_KL_content, save_entity_ids, remove_na
+from .utils import paa_transform, generate_KL_content, save_entity_ids, remove_na, parse_td4c_config
 from .constants import ENTITY_ID, VALUE, TEMPORAL_PROPERTY_ID, TIMESTAMP
+# import List
+from typing import List
 
 class TemporalAbstraction:
     def __init__(self, data: pd.DataFrame):
@@ -23,7 +25,7 @@ class TemporalAbstraction:
               per_entity: bool = False,
               split_test: bool = False,
               save_output: bool = True, output_dir: str = None, train_ratio: float = 0.7,
-              max_gap: int = 1, train_states = None, **kwargs):
+              max_gap: int = 1, train_states = None, skip_var: List[int] = None, **kwargs):
         """
         Apply temporal abstraction and (optionally) split into train and test sets.
         
@@ -57,6 +59,12 @@ class TemporalAbstraction:
           In composite mode with split_test: ((final_train, final_test), final_states)
         """
         data_to_use = self.data.copy()
+        if skip_var is not None:
+            print(f"Skipping variables: {skip_var}")
+            skip_rows = data_to_use[data_to_use[TEMPORAL_PROPERTY_ID].isin(skip_var)] # check if temporalPropertyID is in the list skip_var
+            # remove skip rows from data_to_use
+            data_to_use = data_to_use[~data_to_use.index.isin(skip_rows.index)]
+        
         
         # --- Extract Class Assignment Rows ---
         class_rows = data_to_use[data_to_use[TEMPORAL_PROPERTY_ID] == -1].copy()
@@ -114,12 +122,21 @@ class TemporalAbstraction:
                 elif method == "gradient":
                     from .methods.gradient import Gradient
                     ta_method = Gradient(**kwargs)
-                elif method == "td4c":
+                elif method == "td4c" or (isinstance(method, str) and method.startswith("td4c_")):
                     from .methods.td4c import TD4C
-                    ta_method = TD4C(**kwargs)
+                    # Parse TD4C config if method name contains distance measure
+                    td4c_kwargs = kwargs.copy()
+                    if method.startswith("td4c_") and "distance_measure" not in td4c_kwargs:
+                        distance_measure = parse_td4c_config(method)
+                        td4c_kwargs["distance_measure"] = distance_measure
+                    ta_method = TD4C(**td4c_kwargs)
                 elif method == "persist":
                     from .methods.persist import Persist
                     ta_method = Persist(**kwargs)
+                elif method == "tid3":
+                    from .methods.tid3 import TID3
+                    ta_method = TID3(**kwargs)
+                    ta_method.entity_class = self.entity_class  # Pass entity-class mapping
                 else:
                     raise ValueError(f"Method '{method}' is not supported.")
                 ta_method.fit(train_data)
@@ -140,9 +157,14 @@ class TemporalAbstraction:
                 elif method == "gradient":
                     from .methods.gradient import Gradient
                     ta_method = Gradient(**kwargs)
-                elif method == "td4c":
+                elif method == "td4c" or (isinstance(method, str) and method.startswith("td4c_")):
                     from .methods.td4c import TD4C
-                    ta_method = TD4C(**kwargs)
+                    # Parse TD4C config if method name contains distance measure
+                    td4c_kwargs = kwargs.copy()
+                    if method.startswith("td4c_") and "distance_measure" not in td4c_kwargs:
+                        distance_measure = parse_td4c_config(method)
+                        td4c_kwargs["distance_measure"] = distance_measure
+                    ta_method = TD4C(**td4c_kwargs)
                 elif method == "persist":
                     from .methods.persist import Persist
                     ta_method = Persist(**kwargs)
@@ -151,10 +173,18 @@ class TemporalAbstraction:
                     if train_states is None:
                         raise ValueError("train_states parameter is required for knowledge-based method")
                     ta_method = KnowledgeBased(states=train_states, **kwargs)
+                elif method == "tid3":
+                    from .methods.tid3 import TID3
+                    ta_method = TID3(**kwargs)
+                    ta_method.entity_class = self.entity_class  # Pass entity-class mapping
                 else:
                     raise ValueError(f"Method '{method}' is not supported.")
                 final_result = ta_method.fit_transform(train_data)
                 final_states = ta_method.get_states()
+        
+        if skip_var is not None:
+            # concat final_result with skip rows
+            final_result = pd.concat([final_result, skip_rows], ignore_index=True)
         
         if save_output:
             if output_dir is None:
@@ -250,9 +280,14 @@ class TemporalAbstraction:
                 elif method_name == "gradient":
                     from .methods.gradient import gradient
                     local_result, local_states = gradient(subset_method, **params, per_variable=True)
-                elif method_name == "td4c":
+                elif method_name == "td4c" or (isinstance(method_name, str) and method_name.startswith("td4c_")):
                     from .methods.td4c import TD4C
-                    td4c_inst = TD4C(**params, per_variable=True)
+                    # Parse TD4C config if method name contains distance measure
+                    td4c_params = params.copy()
+                    if method_name.startswith("td4c_") and "distance_measure" not in td4c_params:
+                        distance_measure = parse_td4c_config(method_name)
+                        td4c_params["distance_measure"] = distance_measure
+                    td4c_inst = TD4C(**td4c_params, per_variable=True)
                     local_result = td4c_inst.fit_transform(subset_method)
                     local_states = td4c_inst.get_states()
                 elif method_name == "persist":
@@ -260,6 +295,12 @@ class TemporalAbstraction:
                     persist_inst = Persist(**params, per_variable=True)
                     local_result = persist_inst.fit_transform(subset_method)
                     local_states = persist_inst.get_states()
+                elif method_name == "tid3":
+                    from .methods.tid3 import TID3
+                    tid3_inst = TID3(**params, per_variable=True)
+                    tid3_inst.entity_class = self.entity_class  # Pass entity-class mapping
+                    local_result = tid3_inst.fit_transform(subset_method)
+                    local_states = tid3_inst.get_states()
                 else:
                     raise ValueError(f"Unsupported method: {method_name} for variable {tpid}")
                 if isinstance(local_states, dict):
@@ -326,9 +367,14 @@ class TemporalAbstraction:
                 elif method_name == "gradient":
                     from .methods.gradient import gradient
                     local_result, local_states = gradient(subset_method, **params, per_variable=True)
-                elif method_name == "td4c":
+                elif method_name == "td4c" or (isinstance(method_name, str) and method_name.startswith("td4c_")):
                     from .methods.td4c import TD4C
-                    td4c_inst = TD4C(**params, per_variable=True)
+                    # Parse TD4C config if method name contains distance measure
+                    td4c_params = params.copy()
+                    if method_name.startswith("td4c_") and "distance_measure" not in td4c_params:
+                        distance_measure = parse_td4c_config(method_name)
+                        td4c_params["distance_measure"] = distance_measure
+                    td4c_inst = TD4C(**td4c_params, per_variable=True)
                     local_result = td4c_inst.fit_transform(subset_method)
                     local_states = td4c_inst.get_states()
                 elif method_name == "persist":
@@ -336,6 +382,12 @@ class TemporalAbstraction:
                     persist_inst = Persist(**params, per_variable=True)
                     local_result = persist_inst.fit_transform(subset_method)
                     local_states = persist_inst.get_states()
+                elif method_name == "tid3":
+                    from .methods.tid3 import TID3
+                    tid3_inst = TID3(**params, per_variable=True)
+                    tid3_inst.entity_class = self.entity_class  # Pass entity-class mapping
+                    local_result = tid3_inst.fit_transform(subset_method)
+                    local_states = tid3_inst.get_states()
                 else:
                     raise ValueError(f"Unsupported method: {method_name} for variable {tpid}")
                 if isinstance(local_states, dict):
@@ -400,6 +452,54 @@ class TemporalAbstraction:
         composite_results = []
         default_config = method_config.get("default", None)
         unique_vars = train_data[TEMPORAL_PROPERTY_ID].unique()
+        
+        # STEP 1: Pre-process ALL knowledge method states across ALL variables FIRST
+        # This ensures all knowledge StateIDs are registered before other methods start
+        knowledge_results = {}  # Store knowledge results per variable to use later
+        
+        for tpid in unique_vars:
+            subset = train_data[train_data[TEMPORAL_PROPERTY_ID] == tpid]
+            
+            if isinstance(method_config, dict) and tpid in method_config:
+                cfgs = method_config[tpid]
+            else:
+                cfgs = method_config.get("default")
+            if not isinstance(cfgs, list):
+                cfgs = [cfgs]
+            
+            # Look for knowledge method
+            for config in cfgs:
+                if config.get("method") == "knowledge":
+                    method_name = "knowledge"
+                    params = config.copy()
+                    params.pop("method", None)
+                    
+                    # Run knowledge method
+                    from .methods.knowledge import knowledge
+                    local_result, local_states = knowledge(subset, **params, per_variable=True)
+                    
+                    # If it's a CSV DataFrame, add ALL its states to global_states_rows NOW
+                    if isinstance(local_states, pd.DataFrame):
+                        for _, row in local_states[local_states['TemporalPropertyID'] == tpid].iterrows():
+                            state_id = int(row['StateID'])
+                            bin_id = row.get('BinID', row.get('BinId', 0))
+                            
+                            global_states_rows.append({
+                                "StateID": state_id,
+                                "TemporalPropertyID": row['TemporalPropertyID'],
+                                "TemporalPropertyName": row.get('TemporalPropertyName', ''),
+                                "MethodName": method_name,
+                                "BinId": bin_id,
+                                "BinLabel": row.get('BinLabel', ''),
+                                "BinLow": row['BinLow'],
+                                "BinHigh": row['BinHigh'],
+                            })
+                        
+                        # Store the result to use when building final composite results
+                        knowledge_results[tpid] = (local_result, local_states)
+                    break  # Only one knowledge method per variable
+        
+        # STEP 2: Now process each variable with ALL methods (including knowledge from cache)
         for tpid in unique_vars:
             subset = train_data[train_data[TEMPORAL_PROPERTY_ID] == tpid]
             # Here, we assume that for composite per-variable mode, method_config is a dict keyed by tpid.
@@ -410,10 +510,24 @@ class TemporalAbstraction:
             if not isinstance(cfgs, list):
                 cfgs = [cfgs]
             local_global_states = {}
+            
             for config in cfgs:
                 method_name = config.get("method")
                 params = config.copy()
                 params.pop("method", None)
+                
+                # Check if this is knowledge method and we already processed it
+                if method_name == "knowledge" and tpid in knowledge_results:
+                    # Use cached knowledge result
+                    local_result, local_states = knowledge_results[tpid]
+                    col_name = f"state_{method_name}"
+                    local_result = local_result.copy()
+                    # The state column already contains the correct StateID from the CSV
+                    local_result[col_name] = local_result["state"]
+                    local_global_states[method_name] = local_result[col_name]
+                    continue  # Skip to next method
+                
+                # Process other methods normally
                 if method_name == "equal_width":
                     from .methods.equal_width import equal_width
                     local_result, local_states = equal_width(subset, **params, per_variable=True)
@@ -426,21 +540,38 @@ class TemporalAbstraction:
                 elif method_name == "gradient":
                     from .methods.gradient import gradient
                     local_result, local_states = gradient(subset, **params, per_variable=True)
-                elif method_name == "td4c":
+                elif method_name == "td4c" or (isinstance(method_name, str) and method_name.startswith("td4c_")):
                     from .methods.td4c import TD4C
-                    local_result, local_states = TD4C(subset= subset, **params, per_variable=True).fit_transform(subset), TD4C(subset= subset, **params, per_variable=True).get_states()
+                    # Parse TD4C config if method name contains distance measure
+                    td4c_params = params.copy()
+                    if method_name.startswith("td4c_") and "distance_measure" not in td4c_params:
+                        distance_measure = parse_td4c_config(method_name)
+                        td4c_params["distance_measure"] = distance_measure
+                    td4c_inst = TD4C(**td4c_params, per_variable=True)
+                    local_result = td4c_inst.fit_transform(subset)
+                    local_states = td4c_inst.get_states()
                 elif method_name == "persist":
                     from .methods.persist import Persist
                     local_result, local_states = Persist(subset= subset, **params, per_variable=True).fit_transform(subset), Persist(subset= subset, **params, per_variable=True).get_states()
+                elif method_name == "tid3":
+                    from .methods.tid3 import TID3
+                    tid3_inst = TID3(**params, per_variable=True)
+                    tid3_inst.entity_class = self.entity_class  # Pass entity-class mapping
+                    local_result = tid3_inst.fit_transform(subset)
+                    local_states = tid3_inst.get_states()
                 elif method_name == "knowledge":
-                    from .methods.knowledge import KnowledgeBased
-                    local_result, local_states = KnowledgeBased(**params, per_variable=True).fit_transform(subset), KnowledgeBased(**params, per_variable=True).get_states()
+                    # Knowledge method not in cache (dict-based, not CSV)
+                    from .methods.knowledge import knowledge
+                    local_result, local_states = knowledge(subset, **params, per_variable=True)
                 else:
                     raise ValueError(f"Unsupported method: {method_name} for variable {tpid}")
+                
+                # Normal handling for all non-cached methods
                 if isinstance(local_states, dict):
                     boundaries = local_states.get(tpid)
                 else:
                     boundaries = local_states
+                
                 col_name = f"state_{method_name}"
                 local_result = local_result.copy()
                 local_result[col_name] = local_result.apply(
@@ -492,12 +623,25 @@ class TemporalAbstraction:
                 elif method_name == "gradient":
                     from .methods.gradient import gradient
                     local_result, _ = gradient(subset, **params, per_variable=True)
-                elif method_name == "td4c":
+                elif method_name == "td4c" or (isinstance(method_name, str) and method_name.startswith("td4c_")):
                     from .methods.td4c import TD4C
-                    local_result, _ = TD4C(subset= subset, **params, per_variable=True).fit_transform(subset), TD4C(subset= subset, **params, per_variable=True).get_states()
+                    # Parse TD4C config if method name contains distance measure
+                    td4c_params = params.copy()
+                    if method_name.startswith("td4c_") and "distance_measure" not in td4c_params:
+                        distance_measure = parse_td4c_config(method_name)
+                        td4c_params["distance_measure"] = distance_measure
+                    td4c_inst = TD4C(**td4c_params, per_variable=True)
+                    local_result = td4c_inst.fit_transform(subset)
+                    _ = td4c_inst.get_states()
                 elif method_name == "persist":
                     from .methods.persist import Persist
                     local_result, _ = Persist(subset= subset, **params, per_variable=True).fit_transform(subset), Persist(subset= subset, **params, per_variable=True).get_states()
+                elif method_name == "tid3":
+                    from .methods.tid3 import TID3
+                    tid3_inst = TID3(**params, per_variable=True)
+                    tid3_inst.entity_class = self.entity_class  # Pass entity-class mapping
+                    local_result = tid3_inst.fit_transform(subset)
+                    _ = tid3_inst.get_states()
                 elif method_name == "knowledge":
                     from .methods.knowledge import KnowledgeBased
                     local_result, _ = KnowledgeBased(**params, per_variable=True).fit_transform(subset), KnowledgeBased(**params, per_variable=True).get_states()
@@ -542,7 +686,14 @@ class TemporalAbstraction:
                 else:
                     bin_low = boundaries[local_state - 2]
                     bin_high = boundaries[local_state - 1]
-            global_id = len(global_mapping) + 1
+            
+            # Calculate next StateID: should be max(existing StateIDs) + 1
+            if global_states_rows:
+                max_state_id = max(row["StateID"] for row in global_states_rows)
+                global_id = max_state_id + 1
+            else:
+                global_id = len(global_mapping) + 1
+            
             global_mapping[key] = global_id
             global_states_rows.append({
                 "StateID": global_id,
@@ -564,9 +715,15 @@ class TemporalAbstraction:
             else:
                 return (1, str(x))
         
-        if isinstance(states, list) and states and "MethodName" in states[0]:
+        # Check if states is already a DataFrame (from knowledge method CSV)
+        if isinstance(states, pd.DataFrame):
+            # Knowledge method provided a CSV - save it as-is
+            states_df = states.copy()
+        elif isinstance(states, list) and states and "MethodName" in states[0]:
+            # Composite mode with multiple methods
             states_df = pd.DataFrame(states)
         else:
+            # Single method with dict boundaries
             global_mapping = {}
             states_rows = []
             for tpid in sorted(states.keys(), key=sort_key):
@@ -596,18 +753,24 @@ class TemporalAbstraction:
         
         updated_series = symbolic_series.copy().reset_index(drop=True)
         if "MethodName" not in updated_series.columns:
-            global_mapping = {}
-            for tpid in sorted(states.keys(), key=sort_key):
-                boundaries = states[tpid]
-                num_bins = len(boundaries) + 1
-                for local_bin in range(1, num_bins + 1):
-                    global_mapping[(tpid, local_bin)] = len(global_mapping) + 1
-            def map_state(row):
-                tpid = row[TEMPORAL_PROPERTY_ID]
-                local_state = int(row["state"])
-                return global_mapping.get((tpid, local_state), local_state)
-            updated_series["state"] = updated_series.apply(map_state, axis=1)
-            updated_series = updated_series.rename(columns={"state": "StateID"})
+            # Single method mode
+            if isinstance(states, pd.DataFrame):
+                # Knowledge method with CSV - state column already contains correct StateIDs
+                updated_series = updated_series.rename(columns={"state": "StateID"})
+            else:
+                # Other methods with dict boundaries
+                global_mapping = {}
+                for tpid in sorted(states.keys(), key=sort_key):
+                    boundaries = states[tpid]
+                    num_bins = len(boundaries) + 1
+                    for local_bin in range(1, num_bins + 1):
+                        global_mapping[(tpid, local_bin)] = len(global_mapping) + 1
+                def map_state(row):
+                    tpid = row[TEMPORAL_PROPERTY_ID]
+                    local_state = int(row["state"])
+                    return global_mapping.get((tpid, local_state), local_state)
+                updated_series["state"] = updated_series.apply(map_state, axis=1)
+                updated_series = updated_series.rename(columns={"state": "StateID"})
         symbolic_file = os.path.join(output_dir, "symbolic_time_series.csv")
         updated_series.to_csv(symbolic_file, index=False)
         
