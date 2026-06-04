@@ -4,7 +4,6 @@ A Python toolkit for converting numeric time-series data into **symbolic tempora
 
 This repository implements several temporal abstraction methods that transform continuous time-series values into discrete states. These representations are useful for interpretable time-series analysis, sequential pattern mining, feature engineering, and symbolic machine-learning pipelines.
 
-> Portfolio focus: **time-series representation learning, symbolic ML, temporal abstraction, and research tooling.**
 
 ## Motivation
 
